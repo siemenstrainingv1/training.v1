@@ -1,21 +1,49 @@
+apiVersion: 1.0.0
 metadata:
-  name: MyDevops
+  generateName: MyDevOps-
 projects:
-  - name: mydevops
+  - name: userproject
     source:
-      location: "https://oauth2:CSC-wDWwNjRYDDWjmGtEC79f@code.siemens.com/eclipse-che-test-projects/eclipse-che-python-test.git"
+      location: 'https://oauth2:CSC-wDWwNjRYDDWjmGtEC79f@code.siemens.com/eclipse-che-test-projects/eclipse-che-python-test.git'
       type: git
-components:      
-  - id: eclipse/che-machine-exec-plugin/latest
-    type: chePlugin
+      branch: master
+components:
+  - mountSources: true
+    referenceContent: |
+      kind: List
+      items:
+        - apiVersion: extensions/v1beta1
+          kind: Deployment
+          metadata:
+            name: export-pipeline
+            namespace: che
+          spec:
+            replicas: 1
+            template:
+              metadata:
+                labels:
+                  app: export-pipeline
+              spec:
+                containers:
+                  - name: export-pipeline
+                    #image: docker.siemens.com/idevops/mydevops/eaas-mydevops/expoter/gitlab:stable
+                    image: trainingsiemensv1/mydevops:gitlab
+                    securityContext:
+                      runAsUser: 0
+                      privileged: true
+                    env:
+                      - name: DOCKER_TLS_CERTDIR
+                        value: ''
+                imagePullSecrets:
+                  - name: che-secret
+    type: kubernetes
+    volumes:
+      - name: sharedvolume
+        containerPath: /sharedvolume/
+    alias: exportPipeline
   - id: ms-python/python/latest
     memoryLimit: 512Mi
     type: chePlugin
-  - mountSources: true
-    memoryLimit: 512Mi
-    type: dockerimage
-    alias: python
-    image: 'docker.artifactory.int.idevops.de/che/python-run:latest'
   - id: ms-kubernetes-tools/vscode-kubernetes-tools/latest
     type: chePlugin
   - mountSources: true
@@ -35,28 +63,105 @@ components:
                   app: mydevops
               spec:
                 containers:
-                  - name: docker
-                    image: docker:dind
+                  - name: pipeline
+                    #image: docker.siemens.com/idevops/mydevops/eaas-mydevops/executor/dind:stable
+                    image:  trainingsiemensv1/mydevops:dind
+                    command: ['dockerd']
                     securityContext:
                       runAsUser: 0
                       privileged: true
                     env:
                       - name: DOCKER_TLS_CERTDIR
                         value: ''
-
+                imagePullSecrets:
+                  - name: che-secret
     type: kubernetes
-    alias: docker
-apiVersion: 1.0.0    
+    volumes:
+      - name: sharedvolume
+        containerPath: /sharedvolume/
+    alias: pipeline
 commands:
-  - name: command_name
+  - name: 1 Build
+    actions:
+      - workdir: '${CHE_PROJECTS_ROOT}/userproject'
+        type: exec
+        command: chmod 666 /var/run/docker.sock && /commands/buildpacks.sh
+        component: pipeline
+  - name: 2 Test
+    actions:
+      - workdir: '${CHE_PROJECTS_ROOT}/userproject'
+        type: exec
+        command: chmod 666 /var/run/docker.sock && /commands/testing.sh
+        component: pipeline
+  - name: 3 Generate Quality Report
+    actions:
+      - workdir: '${CHE_PROJECTS_ROOT}/userproject'
+        type: exec
+        command: chmod 666 /var/run/docker.sock && /commands/codeQuality.sh
+        component: pipeline
+  - name: 4 Check For Token Leaks
+    actions:
+      - workdir: '${CHE_PROJECTS_ROOT}/userproject'
+        type: exec
+        command: chmod 666 /var/run/docker.sock && /commands/checkForLeaks.sh
+        component: pipeline
+  - name: 5 Check For Licenses
+    actions:
+      - workdir: '${CHE_PROJECTS_ROOT}/userproject'
+        type: exec
+        command: chmod 666 /var/run/docker.sock && /commands/licenseFinder.sh
+        component: pipeline
+  - name: 6 Scan Containers
+    actions:
+      - workdir: '${CHE_PROJECTS_ROOT}/userproject'
+        type: exec
+        command: chmod 666 /var/run/docker.sock && /commands/trivy.sh
+        component: pipeline
+  - name: 7 Upload Image
+    actions:
+      - workdir: '${CHE_PROJECTS_ROOT}/userproject'
+        type: exec
+        command: chmod 666 /var/run/docker.sock && /commands/uploadImage.sh
+        component: pipeline
+  - name: 0 Run All Stages
+    actions:
+      - workdir: '${CHE_PROJECTS_ROOT}/userproject'
+        type: exec
+        command: chmod 666 /var/run/docker.sock && /commands/runAll.sh
+        component: pipeline
+  - name: 8 Export logs
+    actions:
+      - workdir: '${CHE_PROJECTS_ROOT}/userproject'
+        type: exec
+        command: cp -r /tmp/.logs .
+        component: pipeline
+  - name: 9 Export commands to project
+    actions:
+      - workdir: '${CHE_PROJECTS_ROOT}/userproject'
+        type: exec
+        command: cp -r /usercommands . && chmod 777 ./usercommands/*
+        component: pipeline
+  - name: Add Helm Chart
+    actions:
+      - workdir: '${CHE_PROJECTS_ROOT}/userproject'
+        type: exec
+        command: /commands/addHelm.sh
+        component: pipeline
+  - name: View Help
     actions:
       - workdir: '${CHE_PROJECTS_ROOT}'
         type: exec
-        command: command_value
-        component: docker
-  - name: aws-cli
+        command: cp -r /help/ .
+        component: pipeline
+  - name: Export reports
     actions:
-      - workdir: '${CHE_PROJECTS_ROOT}'
+      - workdir: /report/
         type: exec
-        command: docker login docker.siemens.com -u puneet.shukla@siemens.com -p CSC-F1KPiY9YrhhC1wCyzero && docker pull docker.siemens.com/idevops/mydevops/mydevops-eclipse-che:aws && docker run --rm -it docker.siemens.com/idevops/mydevops/mydevops-eclipse-che:aws && exit 0
-        component: docker
+        command: pip install json2html && chmod 777 ./show_reports.sh && ./show_reports.sh
+        component: exportPipeline
+  - name: Export Pipeline
+    actions:
+      - workdir: /export/
+        type: exec
+        command: cp -rf . /projects/userproject/ && chmod 777 /projects/userproject/.gitlab-ci.yml /projects/userproject/runner-script.sh
+        component: exportPipeline
