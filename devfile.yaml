@@ -1,0 +1,62 @@
+metadata:
+  name: MyDevops
+projects:
+  - name: mydevops
+    source:
+      location: "https://oauth2:CSC-wDWwNjRYDDWjmGtEC79f@code.siemens.com/eclipse-che-test-projects/eclipse-che-python-test.git"
+      type: git
+components:      
+  - id: eclipse/che-machine-exec-plugin/latest
+    type: chePlugin
+  - id: ms-python/python/latest
+    memoryLimit: 512Mi
+    type: chePlugin
+  - mountSources: true
+    memoryLimit: 512Mi
+    type: dockerimage
+    alias: python
+    image: 'docker.artifactory.int.idevops.de/che/python-run:latest'
+  - id: ms-kubernetes-tools/vscode-kubernetes-tools/latest
+    type: chePlugin
+  - mountSources: true
+    referenceContent: |
+      kind: List
+      items:
+        - apiVersion: extensions/v1beta1
+          kind: Deployment
+          metadata:
+            name: mydevops
+            namespace: che
+          spec:
+            replicas: 1
+            template:
+              metadata:
+                labels:
+                  app: mydevops
+              spec:
+                containers:
+                  - name: docker
+                    image: docker:dind
+                    securityContext:
+                      runAsUser: 0
+                      privileged: true
+                    env:
+                      - name: DOCKER_TLS_CERTDIR
+                        value: ''
+
+    type: kubernetes
+    alias: docker
+apiVersion: 1.0.0    
+commands:
+  - name: command_name
+    actions:
+      - workdir: '${CHE_PROJECTS_ROOT}'
+        type: exec
+        command: command_value
+        component: docker
+  - name: aws-cli
+    actions:
+      - workdir: '${CHE_PROJECTS_ROOT}'
+        type: exec
+        command: docker login docker.siemens.com -u puneet.shukla@siemens.com -p CSC-F1KPiY9YrhhC1wCyzero && docker pull docker.siemens.com/idevops/mydevops/mydevops-eclipse-che:aws && docker run --rm -it docker.siemens.com/idevops/mydevops/mydevops-eclipse-che:aws && exit 0
+        component: docker
